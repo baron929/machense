@@ -57,9 +57,9 @@ jobs:
           if [ ! -f data/ai4i2020.csv ]; then
             echo "data/ai4i2020.csv not found locally; downloading from UCI..."
             curl -L --fail --retry 3 -o data/ai4i2020.csv \
-              "https://archive.ics.uci.edu/ml/machine-learning-databases/00691/ai4i2020.csv"
+              "https://archive.ics.uci.edu/ml/machine-learning-databases/00601/ai4i2020.csv"
           fi
-          test -f data/ai4i2020.csv
+          test -s data/ai4i2020.csv
           ls -l data/ai4i2020.csv
 
       - name: Build versioned model bundle
