@@ -5,6 +5,8 @@ import pytest
 
 from deployment import main
 
+TEST_API_KEY = "test-api-key"
+
 
 class FakeModel:
     def predict(self, values):
@@ -34,6 +36,59 @@ def test_health_and_readiness(monkeypatch):
     response = request("GET", "/health")
     assert response.json() == {"status": "healthy"}
     assert request("GET", "/ready").status_code == 200
+
+
+def test_openapi_exposes_api_key_security_scheme():
+    schema = main.app.openapi()
+
+    assert schema["components"]["securitySchemes"]["X-API-Key"] == {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-API-Key",
+    }
+    assert schema["paths"]["/predict"]["post"]["security"] == [
+        {"X-API-Key": []}
+    ]
+    assert "security" not in schema["paths"]["/health"]["get"]
+
+
+def test_prediction_accepts_valid_api_key(monkeypatch):
+    monkeypatch.setenv("MACHSENSE_API_KEY", TEST_API_KEY)
+    monkeypatch.setattr(main, "model", FakeModel())
+    monkeypatch.setattr(main, "load_model", lambda: None)
+    response = request(
+        "POST",
+        "/predict",
+        json={
+            "Type": "M",
+            "Air temperature [K]": 298.1,
+            "Process temperature [K]": 308.6,
+            "Rotational speed [rpm]": 1551,
+            "Torque [Nm]": 42.8,
+            "Tool wear [min]": 0,
+        },
+        headers={"X-API-Key": TEST_API_KEY},
+    )
+
+    assert response.status_code == 200
+
+
+def test_prediction_rejects_missing_api_key(monkeypatch):
+    monkeypatch.setenv("MACHSENSE_API_KEY", TEST_API_KEY)
+    monkeypatch.setattr(main, "model", FakeModel())
+    monkeypatch.setattr(main, "load_model", lambda: None)
+    response = request("POST", "/predict")
+
+    assert response.status_code == 401
+
+
+def test_prediction_rejects_invalid_api_key(monkeypatch):
+    monkeypatch.setenv("MACHSENSE_API_KEY", TEST_API_KEY)
+    monkeypatch.setattr(main, "model", FakeModel())
+    monkeypatch.setattr(main, "load_model", lambda: None)
+    response = request("POST", "/predict", headers={"X-API-Key": "wrong-key"})
+
+    assert response.status_code == 401
 
 
 def test_load_model_resolves_registry_reference_explicitly(monkeypatch):
@@ -90,6 +145,7 @@ def test_lifespan_fails_with_invalid_artifact(monkeypatch, tmp_path):
 
 
 def test_prediction_returns_model_metadata(monkeypatch):
+    monkeypatch.setenv("MACHSENSE_API_KEY", TEST_API_KEY)
     monkeypatch.setattr(main, "model", FakeModel())
     monkeypatch.setattr(main, "load_model", lambda: None)
     response = request(
@@ -103,7 +159,7 @@ def test_prediction_returns_model_metadata(monkeypatch):
             "Torque [Nm]": 42.8,
             "Tool wear [min]": 0,
         },
-        headers={"X-Request-ID": "test-request"},
+        headers={"X-Request-ID": "test-request", "X-API-Key": TEST_API_KEY},
     )
 
     assert response.status_code == 200
@@ -115,6 +171,7 @@ def test_prediction_returns_model_metadata(monkeypatch):
 
 
 def test_prediction_rejects_non_finite_sensor_values(monkeypatch):
+    monkeypatch.setenv("MACHSENSE_API_KEY", TEST_API_KEY)
     monkeypatch.setattr(main, "model", FakeModel())
     monkeypatch.setattr(main, "load_model", lambda: None)
     response = request(
@@ -128,12 +185,14 @@ def test_prediction_rejects_non_finite_sensor_values(monkeypatch):
             "Torque [Nm]": 42.8,
             "Tool wear [min]": 0,
         },
+        headers={"X-API-Key": TEST_API_KEY},
     )
 
     assert response.status_code == 422
 
 
 def test_prediction_does_not_expose_internal_errors(monkeypatch):
+    monkeypatch.setenv("MACHSENSE_API_KEY", TEST_API_KEY)
     class BrokenModel:
         def predict(self, values):
             raise RuntimeError("secret internal path")
@@ -151,6 +210,7 @@ def test_prediction_does_not_expose_internal_errors(monkeypatch):
             "Torque [Nm]": 42.8,
             "Tool wear [min]": 0,
         },
+        headers={"X-API-Key": TEST_API_KEY},
     )
 
     assert response.status_code == 500

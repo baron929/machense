@@ -1,13 +1,15 @@
 import logging
 import math
 import os
+import secrets
 import time
 import uuid
 from contextlib import asynccontextmanager
 from typing import Literal
 
 import pandas as pd
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
+from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from src.model_training import load_validated_model, resolve_model_reference
@@ -20,6 +22,11 @@ MAX_REQUEST_BYTES = 16 * 1024
 model = None
 model_load_error = None
 metrics = {"requests_total": 0, "predictions_total": 0, "errors_total": 0}
+api_key_header = APIKeyHeader(
+    name="X-API-Key",
+    scheme_name="X-API-Key",
+    auto_error=False,
+)
 
 
 @asynccontextmanager
@@ -109,6 +116,20 @@ class PredictionResponse(BaseModel):
     request_id: str
 
 
+def require_api_key(api_key: str | None = Depends(api_key_header)) -> str:
+    expected_api_key = os.getenv("MACHSENSE_API_KEY")
+    if (
+        not expected_api_key
+        or not api_key
+        or not secrets.compare_digest(api_key, expected_api_key)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="invalid or missing API key",
+        )
+    return api_key
+
+
 @app.get("/")
 def root():
     return {"message": "Predictive Maintenance Model API is running"}
@@ -150,7 +171,11 @@ def prometheus_metrics() -> Response:
 
 
 @app.post("/predict")
-def predict(data: PredictionRequest, request: Request) -> PredictionResponse:
+def predict(
+    data: PredictionRequest,
+    request: Request,
+    _api_key: str = Depends(require_api_key),
+) -> PredictionResponse:
     request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
     if model is None:
         metrics["errors_total"] += 1
