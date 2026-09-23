@@ -1,9 +1,9 @@
 
-# 🛠️ Predictive Maintenance MLOps
+# MachSense AI: Predictive Maintenance MLOps
 
-**An end-to-end MLOps project for detecting industrial equipment failures using telemetry sensor data.**
+An incremental predictive-maintenance service for industrial telemetry and machine-failure classification.
 
-This project demonstrates the full lifecycle of a machine learning solution using MLOps best practices: from data preparation and model training to deployment, monitoring, and CI/CD automation.
+The current repository trains a scikit-learn random-forest classifier on the UCI AI4I 2020 dataset, logs runs to MLflow, orchestrates training with Prefect, serves predictions with FastAPI, and provides an Evidently drift-report helper. It does not claim production security, measured business outcomes, Kubernetes deployment, or a fully managed model registry.
 
 ---
 
@@ -17,40 +17,32 @@ This predictive maintenance solution addresses critical industrial operational c
 **Core Value Propositions:**
 
 1. **Failure Prevention**
-   - Forecast equipment failures 24-72 hours in advance with 92% accuracy
-   - Reduce unplanned downtime by 30-40%
-   - Minimize secondary damage from catastrophic failures
+    - Estimate machine-failure risk from equipment telemetry.
+    - Support condition-based maintenance decisions after domain validation.
 
 2. **Maintenance Optimization**
-   - Enable condition-based maintenance scheduling
-   - Prioritize high-risk equipment interventions
-   - Reduce spare parts inventory costs by 15-20%
+    - Provide a model-serving foundation for maintenance prioritization.
 
 3. **Operational Intelligence**
-   - Provide explainable failure root cause analysis
-   - Track equipment health degradation trends
-   - Generate AI-powered maintenance recommendations
+    - Track model version, inference latency, and service health.
 
 **Technical Success Metrics:**
 | Metric | Target | Measurement Protocol |
 |--------|--------|----------------------|
-| Prediction Accuracy (F1) | ≥0.90 | Holdout test set |
-| False Positive Rate | <5% | Production monitoring |
-| Inference Latency (p95) | <200ms | Load testing |
-| Model Retraining Frequency | Weekly | Data drift detection |
+| Validation metric | Reported by each training run | Dataset-specific evaluation |
+| Inference latency | Exposed per prediction | Measure with representative load |
+| Retraining frequency | Not automated | Define after drift policy is approved |
 
 
 ## 🏗️ Technical Architecture
 ```mermaid
 flowchart TD
-    A[IoT Sensors] --> B[Data Ingestion]
-    B --> C[Stream Processing]
-    C --> D[Feature Store]
-    D --> E[Model Training]
-    E --> F[Model Registry]
-    F --> G[Prediction Service]
-    G --> H[Monitoring Dashboard]
-    H --> I[Alerting System]
+    A[Telemetry CSV] --> B[Validated data]
+    B --> C[Chronological split]
+    C --> D[MLflow model artifact]
+    D --> E[FastAPI prediction service]
+    E --> F[Health, metrics, and logs]
+    B --> G[Evidently drift report]
 ```
 
 ## ⚙️ End-to-End MLOps Pipeline
@@ -68,7 +60,7 @@ flowchart LR
     end
     
     subgraph MT["2. Model Training"]
-        C --> D[XGBoost]
+        C --> D[Random Forest failure classifier]
         D --> E[MLflow Tracking]
     end
     
@@ -78,12 +70,10 @@ flowchart LR
     end
     
     subgraph MO["4. Monitoring"]
-        G --> H[Prometheus]
+        G --> H[Prometheus-compatible metrics]
         H --> I[Drift Detection]
-        I --> J[Retraining]
     end
     
-    J --> D
 ```
 
 ---
@@ -97,10 +87,8 @@ predictive-maintenance-mlops/
 ├── Makefile                    # Utility commands for development and deployment
 ├── .pre-commit-config.yaml     # Pre-commit hooks
 ├── src/
-│   ├── data_preprocessing.py   # Data cleaning and feature engineering
-│   ├── model_training.py       # ML training with experiment tracking
-│   ├── model_inference.py      # Real-time model inference logic
-│   └── monitoring.py           # Model/data monitoring using Evidently
+│   ├── model_training.py       # Validated AI4I failure classification
+│   └── monitoring.py            # Evidently drift report helper
 ├── flows/
 │   └── prefect_pipeline.py     # Workflow orchestration using Prefect
 ├── deployment/
@@ -117,28 +105,27 @@ predictive-maintenance-mlops/
 
 ## 📊 Dataset
 
-The dataset used for this project consists of telemetry sensor readings collected from industrial machines. Each record includes values such as:
+The bundled `data/ai4i2020.csv` is the UCI AI4I 2020 predictive-maintenance dataset. Each record includes:
 
-- Temperature
-- Pressure
-- Vibration
-- Torque
-- Motor power
-- Failure label (binary classification)
+- Machine type (`L`, `M`, or `H`)
+- Air and process temperature
+- Rotational speed, torque, and tool wear
+- Binary `Machine failure` target
 
-It has been split into training, validation, and test sets and saved in Parquet/CSV format.
+Identifiers and failure-mode indicator columns are intentionally excluded from the model to avoid leakage.
 
 ---
 
 ## 🤖 Modeling
 
-We use a machine learning classification model to predict potential failures. The model is trained using:
+The current implementation predicts `Machine failure` using:
 
-- **Gradient Boosting Classifier (XGBoost)**
-- Feature selection and scaling
-- Evaluation with F1-score, precision, recall, and ROC-AUC
+- **RandomForestClassifier** with balanced class weights
+- One-hot encoding for `Type`
+- Stratified validation with a fixed seed
+- Accuracy, precision, recall, and ROC AUC
 
-All training runs are logged with MLflow and versioned using the model registry.
+Training validates the AI4I schema, rejects unexpected target values and missing sensor data, and logs parameters, metrics, and the model artifact to MLflow. Model promotion and registry governance are planned, not currently implemented.
 
 ---
 
@@ -148,13 +135,61 @@ We use **MLflow** to track our experiments:
 
 - Log model parameters, metrics, and artifacts
 - Save trained models for reproducibility
-- Register best models in the **MLflow Model Registry**
+- Use MLflow Model Registry for versioned artifacts and controlled promotion
+- Keep registry promotion explicit; no trained model is automatically promoted to production
 
-Launch MLflow UI locally:
+Launch the MLflow UI locally with the SQLite backend:
 
 ```bash
-mlflow ui --port 5000
+mlflow ui --backend-store-uri sqlite:///mlflow.db --port 5000
 ```
+
+### MLflow Model Registry configuration
+
+The training pipeline reads registry and tracking configuration from environment variables and never hardcodes private URLs or credentials.
+
+```bash
+export MLFLOW_TRACKING_URI="sqlite:///mlflow.db"
+export MLFLOW_REGISTRY_NAME="MachSenseFailureClassifier"
+export MLFLOW_REGISTRY_ALIAS="staging"
+```
+
+For a remote tracking server, set `MLFLOW_TRACKING_URI` to the server URI, for example:
+
+```bash
+export MLFLOW_TRACKING_URI="http://mlflow-tracking:5000"
+```
+
+> Do not commit credentials, tokens, or private server URLs to the repository.
+
+### Register a model after training
+
+```bash
+python -c "from src.model_training import train_model; train_model('data/ai4i2020.csv')"
+```
+
+This records the run in MLflow, logs the trained model artifact, and attempts registry registration under the name `MachSenseFailureClassifier`. If the registry is unavailable, the run still completes locally and the registry step is reported as skipped instead of breaking the training job.
+
+### Retrieve a specific registered model version
+
+```bash
+mlflow models list -m "MachSenseFailureClassifier"
+mlflow models get-versions --name "MachSenseFailureClassifier"
+```
+
+Or, to resolve a specific version by alias:
+
+```bash
+mlflow mlflow models get-versions --name "MachSenseFailureClassifier"
+```
+
+If you want to promote an approved model explicitly, update the alias only after validation:
+
+```bash
+mlflow set-model-alias --model-name "MachSenseFailureClassifier" --version <VERSION> --alias production
+```
+
+No training job automatically promotes a newly registered model to `production`.
 
 ---
 
@@ -162,14 +197,14 @@ mlflow ui --port 5000
 
 The training pipeline is orchestrated with **Prefect**.
 
-- Flow: Data loading → preprocessing → model training → evaluation → model registration
-- Scheduled to run periodically or manually via Prefect Cloud
+- Flow: data loading → validation/splitting → model training → evaluation → MLflow logging
+- Scheduled deployment and Prefect Cloud operation are not verified in this repository.
 - Easily monitor status and retries
 
-Example command:
+Run the local flow with:
 
 ```bash
-prefect deployment run train-model-flow/train-model
+python -m flows.prefect_pipeline
 ```
 
 ---
@@ -180,25 +215,27 @@ We deploy the trained model using a **FastAPI** web server:
 
 - REST endpoint: `/predict`
 - Input: JSON payload with telemetry features
-- Output: Failure probability and label
+- Output: failure classification, failure probability, model version, inference latency, and request ID
 - Containerized using Docker
 - Deployable to GCP or any container platform
 
-Example request:
+Example request using the AI4I sensor contract:
 
 ```bash
-curl -X POST http://localhost:8000/predict -H "Content-Type: application/json" -d '{"temperature": 72.5, "pressure": 13.7, ...}'
+curl -X POST http://localhost:8000/predict -H "Content-Type: application/json" -d '{"Type":"M","Air temperature [K]":298.1,"Process temperature [K]":308.6,"Rotational speed [rpm]":1551,"Torque [Nm]":42.8,"Tool wear [min]":0}'
 ```
+
+The service also exposes `/health`, `/ready`, `/model/info`, and `/metrics`.
 
 ---
 
 ## 📉 Model Monitoring
 
-Model monitoring is handled with **Evidently** and **Prometheus**:
+Monitoring currently uses **Evidently** for drift reports and a small `/metrics` response for operational counters:
 
-- Detects data drift and performance degradation
-- Logs key metrics (e.g., prediction drift, feature drift)
-- Triggers alerts via Prefect automations when thresholds are crossed
+- Detects distribution changes when a reference and current dataset are supplied.
+- Counts requests, predictions, and errors.
+- Automated alerting and ground-truth performance monitoring are planned.
 
 Metrics are exposed at `/metrics` for Prometheus scraping.
 
@@ -215,21 +252,9 @@ Testing is implemented with **pytest**, and CI/CD with **GitHub Actions**.
 
 ---
 
-## ☁️ Cloud Infrastructure
+## Deployment status
 
-We use **Terraform** to provision infrastructure on **Google Cloud Platform (GCP)**:
-
-- GCS bucket for model storage
-- Cloud Run / GKE for model serving
-- Prefect Cloud for workflow orchestration
-
-To provision:
-
-```bash
-cd deployment/terraform
-terraform init
-terraform apply
-```
+The Docker image builds from the repository root, runs as a non-root user, and has a health check. Terraform currently defines only an optional versioned GCS artifact bucket. Kubernetes and cloud promotion remain deferred until model delivery, secret handling, and operational tests are verified.
 
 ---
 
@@ -245,11 +270,14 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-Set up Prefect and MLflow, and then run the full pipeline:
+Set up the dependencies and run the training flow against the bundled AI4I data:
 
 ```bash
-make run_pipeline
+export DATA_PATH=data/ai4i2020.csv
+python -m flows.prefect_pipeline
 ```
+
+MLflow uses `sqlite:///mlflow.db` by default. Set `MLFLOW_TRACKING_URI` when using a separate tracking server or database.
 
 ---
 
@@ -259,9 +287,9 @@ make run_pipeline
 make setup               # Install dependencies
 make lint                # Run flake8, black, isort
 make test                # Run all tests
-make build               # Build Docker container
+make docker-build       # Build Docker container
 make run                 # Run FastAPI app
-make run_pipeline        # Execute Prefect training flow
+python -m flows.prefect_pipeline  # Execute Prefect training flow
 ```
 
 ---

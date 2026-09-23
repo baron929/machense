@@ -1,34 +1,33 @@
 .PHONY: setup lint format test run docker-build docker-run clean
 
 setup:
-	pip install --upgrade pip
-	pip install -r requirements.txt
-	pre-commit install
+	python -m pip install --upgrade pip
+	python -m pip install -r requirements-dev.txt
+	python -m pre_commit install
 
 lint:
-	black --check .
-	isort --check-only .
-	flake8 src tests
+	python -m black --check src deployment flows tests
+	python -m isort --check-only src deployment flows tests
+	python -m flake8 src deployment flows tests
 
 format:
-	black .
-	isort .
+	python -m black src deployment flows tests
+	python -m isort src deployment flows tests
 
 test:
-	pytest tests/
+	python -m pytest tests/ -q
 
 run:
-	uvicorn deployment.main:app --reload
+	python -m uvicorn deployment.main:app --reload
 
 docker-build:
-	docker build -t predictive-maintenance:latest deployment/
+	docker build -t predictive-maintenance:latest -f deployment/Dockerfile .
 
 docker-run:
 	docker run -p 8000:8000 predictive-maintenance:latest
 
 clean:
-	find . -type f -name '*.pyc' -delete
-	find . -type d -name '__pycache__' -delete
+	python -c "import shutil; from pathlib import Path; [shutil.rmtree(path) for path in Path('.').rglob('__pycache__')]"
 
 
 # ------------------------
@@ -37,10 +36,10 @@ clean:
 
 # Install pre-commit and set up git hook
 precommit-init:
-	pip install pre-commit
-	pre-commit install
-	echo "✅ Pre-commit installed and configured"
+	python -m pip install pre-commit
+	python -m pre_commit install
+	echo "Pre-commit installed and configured"
 
 # Run all pre-commit hooks manually
 precommit-run:
-	pre-commit run --all-files
+	python -m pre_commit run --all-files

@@ -1,14 +1,2 @@
-# Testing
-pytest==8.2.2
-httpx==0.27.0
-
-# Linting & formatting
-flake8==7.0.0
-black==24.4.2
-isort==5.13.2
-
-# Pre-commit hook management
-pre-commit==3.7.1
-
-# Environment variables handling
-python-dotenv==1.0.1
+-r requirements.txt
+pip-audit>=2.7,<3
