@@ -44,6 +44,19 @@ jobs:
           test -n "$DOCKERHUB_NAMESPACE"
           test -n "$DOCKERHUB_REPOSITORY"
 
+      - name: Ensure AI4I dataset is available
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p data
+          if [ ! -f data/ai4i2020.csv ]; then
+            echo "data/ai4i2020.csv not found locally; downloading from UCI..."
+            curl -L --fail --retry 3 -o data/ai4i2020.csv \
+              "https://archive.ics.uci.edu/ml/machine-learning-databases/00691/ai4i2020.csv"
+          fi
+          test -f data/ai4i2020.csv
+          ls -l data/ai4i2020.csv
+
       - name: Build versioned model bundle
         env:
           DATA_PATH: data/ai4i2020.csv
