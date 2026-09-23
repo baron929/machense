@@ -10,6 +10,8 @@ venv_fix/
 .env
 .env.*
 !.env.example
+!data/
+!data/ai4i2020.csv
 data/
 models/
 artifacts/
